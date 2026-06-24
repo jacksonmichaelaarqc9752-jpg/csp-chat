@@ -373,6 +373,8 @@ export async function POST(request: NextRequest) {
       imageDescription
     });
 
+    const assistantContent = await callChatModel([{ role: "system", content: finalPrompt }]);
+
     const { data: userMessage, error: userMessageError } = await supabase
       .from("messages")
       .insert({
@@ -394,14 +396,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: userMessageError.message }, { status: 500 });
     }
 
-    const createdMemory = await maybeExtractAndStoreMemory({
-      supabase,
-      userId,
-      characterId,
-      userMessage: userMessage as DbMessage
-    }).catch(() => null);
-    const assistantContent = await callChatModel([{ role: "system", content: finalPrompt }]);
-
     const { data: assistantMessage, error: assistantMessageError } = await supabase
       .from("messages")
       .insert({
@@ -416,7 +410,7 @@ export async function POST(request: NextRequest) {
           prompt_debug_enabled: Boolean(body.debug || process.env.PROMPT_DEBUG === "true"),
           time_context: timeContext,
           memories_used: relevantMemories,
-          memory_created: createdMemory,
+          memory_created: null,
           relationship_state: relationshipState,
           image_description: imageDescription
         }
@@ -427,6 +421,13 @@ export async function POST(request: NextRequest) {
     if (assistantMessageError) {
       return NextResponse.json({ error: assistantMessageError.message }, { status: 500 });
     }
+
+    const createdMemory = await maybeExtractAndStoreMemory({
+      supabase,
+      userId,
+      characterId,
+      userMessage: userMessage as DbMessage
+    }).catch(() => null);
 
     await supabase
       .from("characters")

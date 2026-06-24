@@ -29,7 +29,7 @@ async function readJsonResponse(response: Response) {
   try {
     return await response.json();
   } catch {
-    return { error: await response.text().catch(() => "请求失败") };
+    return { error: "Request failed without a JSON response." };
   }
 }
 
@@ -91,14 +91,12 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         if (characterError || !characterData) {
           setNotice(characterError?.message || "角色不存在，请返回角色列表重新进入。");
           setMessages([]);
-          setIsLoading(false);
           return;
         }
 
         if (characterData.id !== chatId) {
           setNotice("角色 ID 不匹配，请返回角色列表重新进入。");
           setMessages([]);
-          setIsLoading(false);
           return;
         }
 
@@ -190,6 +188,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
 
     if (isSending) return;
     if (!content && !selectedImage) return;
+
     if (!configured) {
       setNotice("Supabase 环境变量未配置，无法发送消息。");
       return;
@@ -235,9 +234,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       const data = await readJsonResponse(response);
 
       if (!response.ok) {
-        setNotice(data.error || "AI 回复失败，请稍后重试。");
-        setInput(content);
-        return;
+        throw new Error(data.error || `AI response failed with HTTP ${response.status}`);
       }
 
       const nextMessages = [data.user_message, data.assistant_message].filter(Boolean) as DbMessage[];
@@ -246,7 +243,6 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       textareaRef.current?.focus();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "发送失败，请稍后重试。");
-      setInput(content);
     } finally {
       setIsSending(false);
     }
@@ -345,7 +341,11 @@ export default function ChatPage({ params }: { params: { characterId: string } }
 
             <div className="flex-1 space-y-4 pb-40">
               <div className="mx-auto flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-2 text-xs text-slate-300 backdrop-blur">
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-pink-100" /> : <Sparkles className="h-4 w-4 text-pink-100" />}
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-pink-100" />
+                ) : (
+                  <Sparkles className="h-4 w-4 text-pink-100" />
+                )}
                 {isLoading ? "正在加载聊天..." : "长期记忆、图片识别、情绪和好感度会在聊天中自动生效"}
               </div>
 
