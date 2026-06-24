@@ -25,6 +25,33 @@ type UploadResult = {
   path: string;
 };
 
+type CreateCharacterPayload = {
+  name: string;
+  subtitle: string;
+  description: string;
+  avatarUrl: string;
+  bannerUrl: string;
+  skillFileUrl: string;
+  manifestFileUrl: string | null;
+  distillationFileUrl: string | null;
+  tags: string[];
+  greetingMessage: string;
+  personality: string;
+  scenario: string;
+  distilledProfile: string;
+  systemPrompt: string;
+};
+
+type CreateCharacterResult =
+  | {
+      success: true;
+      id: string;
+    }
+  | {
+      success: false;
+      error?: string;
+    };
+
 const characterAssetsBucket = "character-assets";
 const defaultBanner =
   "https://images.unsplash.com/photo-1528164344705-47542687000d?auto=format&fit=crop&w=900&q=80";
@@ -58,6 +85,31 @@ async function uploadFile({
 
   const { data } = supabase.storage.from(characterAssetsBucket).getPublicUrl(path);
   return { publicUrl: data.publicUrl, path };
+}
+
+async function createCharacter(
+  accessToken: string,
+  payload: CreateCharacterPayload
+): Promise<CreateCharacterResult> {
+  const response = await fetch("/api/characters", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = (await response.json()) as CreateCharacterResult;
+
+  if (!response.ok || !result?.success || !result?.id) {
+    return {
+      success: false,
+      error: result?.error || "创建角色失败，请稍后重试。"
+    } satisfies CreateCharacterResult;
+  }
+
+  return { success: true, id: result.id };
 }
 
 export default function NewCharacterPage() {
@@ -96,15 +148,21 @@ export default function NewCharacterPage() {
   }, [avatarFile, avatarUrl]);
 
   function applyImportedCharacter(imported: ImportedCharacter) {
-    if (imported.name) setName(imported.name);
-    if (imported.subtitle) setSubtitle(imported.subtitle);
-    if (imported.description) setDescription(imported.description);
-    if (imported.tags?.length) setTagsText(imported.tags.join(", "));
-    if (imported.greeting_message) setGreetingMessage(imported.greeting_message);
-    if (imported.personality) setPersonality(imported.personality);
-    if (imported.scenario) setScenario(imported.scenario);
-    if (imported.system_prompt) setSystemPrompt(imported.system_prompt);
-    if (imported.distilled_profile) setDistilledProfile(imported.distilled_profile);
+    console.log("[CSP PARSE RESULT]", imported);
+
+    // 只填充空字段，不覆盖用户已输入的内容
+    const filled: string[] = [];
+    if (imported.name && !name) { setName(imported.name); filled.push("name"); }
+    if (imported.subtitle && !subtitle) { setSubtitle(imported.subtitle); filled.push("subtitle"); }
+    if (imported.description && !description) { setDescription(imported.description); filled.push("description"); }
+    if (imported.tags?.length && !tagsText.trim()) { setTagsText(imported.tags.join(", ")); filled.push("tags"); }
+    if (imported.greeting_message && !greetingMessage) { setGreetingMessage(imported.greeting_message); filled.push("greeting_message"); }
+    if (imported.personality && !personality) { setPersonality(imported.personality); filled.push("personality"); }
+    if (imported.scenario && !scenario) { setScenario(imported.scenario); filled.push("scenario"); }
+    if (imported.system_prompt && !systemPrompt) { setSystemPrompt(imported.system_prompt); filled.push("system_prompt"); }
+    if (imported.distilled_profile && !distilledProfile) { setDistilledProfile(imported.distilled_profile); filled.push("distilled_profile"); }
+
+    console.log("[CSP FORM FILLED]", filled.length ? filled : "No fields updated (all already filled or imported values are empty)");
   }
 
   function validateUploads() {
@@ -145,7 +203,7 @@ export default function NewCharacterPage() {
       if (!configured) {
         setSystemPrompt(skillText);
         setDistilledProfile(distillationText || skillText);
-        setMessage("本地预览模式：已读取 SKILL.md 文件内容。");
+        setMessage("本地预览模式：已读取 SKILL.md 文件内容。配置 Supabase 后才能创建角色。");
         return;
       }
 
@@ -194,7 +252,7 @@ export default function NewCharacterPage() {
     }
 
     if (!configured) {
-      router.push("/chat/hoshino-mio");
+      setMessage("Supabase 未配置，无法创建角色。请配置 Supabase 后重试。");
       return;
     }
 
@@ -202,6 +260,14 @@ export default function NewCharacterPage() {
 
     try {
       const supabase = createBrowserSupabaseClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        router.replace("/login");
+        return;
+      }
+
       const { data: userData } = await supabase.auth.getUser();
 
       if (!userData.user) {
@@ -237,36 +303,33 @@ export default function NewCharacterPage() {
         })
       ]);
 
-      const { data, error } = await supabase
-        .from("characters")
-        .insert({
-          user_id: userData.user.id,
-          name,
-          subtitle,
-          description,
-          avatar_url: avatarUpload.publicUrl,
-          banner_url: defaultBanner,
-          csp_skill_file_url: skillUpload.publicUrl,
-          manifest_file_url: manifestUpload?.publicUrl ?? null,
-          distillation_file_url: distillationUpload?.publicUrl ?? null,
-          tags,
-          greeting_message: greetingMessage,
-          personality,
-          scenario,
-          distilled_profile: distilledProfile,
-          system_prompt: systemPrompt || distilledProfile || personality || name
-        })
-        .select("id")
-        .single();
+      const res = await createCharacter(accessToken, {
+        name,
+        subtitle,
+        description,
+        avatarUrl: avatarUpload.publicUrl,
+        bannerUrl: defaultBanner,
+        skillFileUrl: skillUpload.publicUrl,
+        manifestFileUrl: manifestUpload?.publicUrl ?? null,
+        distillationFileUrl: distillationUpload?.publicUrl ?? null,
+        tags,
+        greetingMessage,
+        personality,
+        scenario,
+        distilledProfile,
+        systemPrompt
+      });
 
-      if (error) {
-        setMessage(error.message || "保存角色失败，请检查必填项后重试。");
+      console.log("createCharacter result:", res);
+
+      if (!res.success || !res.id) {
+        setMessage(res.error || "创建角色失败，请检查必填项后重试。");
         return;
       }
 
-      router.push(`/chat/${data.id}`);
+      router.push(`/chat/${res.id}`);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "保存角色失败，请稍后重试。";
+      const errorMessage = error instanceof Error ? error.message : "创建角色失败，请稍后重试。";
       setMessage(errorMessage);
     } finally {
       setIsSaving(false);
@@ -293,8 +356,7 @@ export default function NewCharacterPage() {
               <p className="text-sm text-pink-100">创建角色</p>
               <h1 className="mt-2 text-3xl font-bold text-white">上传 CSP 文件并生成角色</h1>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                必须上传 SKILL.md 和头像图片；manifest.json 与 distillation.md 可选。聊天时会读取
-                SKILL.md 作为角色核心设定。
+                必须上传 SKILL.md 和头像图片；manifest.json 与 distillation.md 可选。
               </p>
             </div>
 
@@ -372,7 +434,7 @@ export default function NewCharacterPage() {
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium text-slate-100 backdrop-blur transition hover:bg-white/14 disabled:opacity-60"
               >
                 {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                {isImporting ? "正在解析…" : "解析 CSP 文件"}
+                {isImporting ? "正在解析..." : "解析 CSP 文件"}
               </button>
 
               <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
@@ -480,7 +542,7 @@ export default function NewCharacterPage() {
               </div>
               <div className="p-5">
                 <p className="text-sm leading-6 text-slate-300">
-                  {description || "保存后会直接进入聊天页面，方便测试角色效果。"}
+                  {description || "保存成功后才会进入聊天页；创建失败会停留在当前页面。"}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   {tags.map((tag) => (
@@ -498,7 +560,7 @@ export default function NewCharacterPage() {
                 <div>
                   <p className="font-semibold text-white">文件会保存到 Supabase Storage</p>
                   <p className="text-xs leading-5 text-slate-400">
-                    保存角色后，文件 public URL 会写入 characters 表。
+                    角色创建成功后，文件 public URL 会写入 characters 表。
                   </p>
                 </div>
               </div>
@@ -508,7 +570,7 @@ export default function NewCharacterPage() {
           <div className="fixed inset-x-4 bottom-4 z-20 mx-auto max-w-6xl lg:static lg:inset-auto lg:col-span-2">
             <PrimaryButton className="w-full lg:w-auto" disabled={isSaving}>
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {isSaving ? "正在上传并保存…" : "保存并开始聊天"}
+              {isSaving ? "正在上传并保存..." : "保存并开始聊天"}
             </PrimaryButton>
           </div>
         </form>

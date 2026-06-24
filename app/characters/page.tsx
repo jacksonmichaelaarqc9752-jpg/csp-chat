@@ -53,16 +53,17 @@ export default function CharactersPage() {
 
   const filteredCharacters = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    if (!keyword) return characters;
+    const list = Array.isArray(characters) ? characters : [];
+    if (!keyword) return list;
 
-    return characters.filter((character) => {
+    return list.filter((character) => {
       const text = [
         character.name,
         character.subtitle,
         character.description,
         character.personality,
         character.scenario,
-        character.tags.join(" ")
+        (character.tags ?? []).join(" ")
       ]
         .filter(Boolean)
         .join(" ")
@@ -130,7 +131,7 @@ export default function CharactersPage() {
             <div className="mt-4 space-y-3">
               <div className="flex items-center justify-between rounded-2xl bg-white/8 p-3">
                 <span className="text-sm text-slate-300">角色数量</span>
-                <span className="font-semibold text-white">{characters.length}</span>
+                <span className="font-semibold text-white">{(characters ?? []).length}</span>
               </div>
               <div className="flex items-center justify-between rounded-2xl bg-white/8 p-3">
                 <span className="text-sm text-slate-300">数据源</span>

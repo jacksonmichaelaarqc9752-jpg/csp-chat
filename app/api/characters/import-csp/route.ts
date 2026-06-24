@@ -108,6 +108,8 @@ export async function POST(request: NextRequest) {
       }
     );
 
+    console.log("[CSP PARSE RESULT]", JSON.stringify(imported, null, 2));
+
     return NextResponse.json({ character: imported });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown server error";

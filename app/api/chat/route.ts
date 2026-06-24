@@ -111,15 +111,53 @@ function formatTimeContext(timeZone: string, lastMessageAt?: string) {
   ].join("\n");
 }
 
-async function fetchTextFile(url: string | null | undefined) {
-  if (!url) return null;
-
+function extractStoragePath(publicUrl: string): string | null {
   try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) return null;
-    return (await response.text()).trim();
+    const url = new URL(publicUrl);
+    const match = url.pathname.match(/\/storage\/v1\/object\/public\/character-assets\/(.+)/);
+    return match ? decodeURIComponent(match[1]) : null;
   } catch {
     return null;
+  }
+}
+
+async function fetchTextFile(
+  url: string | null | undefined,
+  supabase?: ReturnType<typeof createServerSupabaseClient>
+): Promise<string | null> {
+  if (!url) return null;
+
+  const attemptPublicFetch = async () => {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Public URL fetch failed with status ${response.status}`);
+    return (await response.text()).trim();
+  };
+
+  const attemptStorageDownload = async () => {
+    if (!supabase) throw new Error("No Supabase client available for storage fallback");
+    const path = extractStoragePath(url);
+    if (!path) throw new Error(`Cannot extract storage path from URL: ${url}`);
+    const { data, error } = await supabase.storage.from("character-assets").download(path);
+    if (error || !data) throw new Error(`Storage download failed: ${error?.message || "no data"}`);
+    return await data.text();
+  };
+
+  try {
+    return await attemptPublicFetch();
+  } catch (publicError) {
+    console.warn("[fetchTextFile] Public URL fetch failed, trying storage download:", publicError);
+
+    try {
+      const text = await attemptStorageDownload();
+      console.log("[fetchTextFile] Storage download succeeded as fallback");
+      return text.trim();
+    } catch (storageError) {
+      console.error(
+        `[fetchTextFile] Both fetch methods failed for URL: ${url}`,
+        { publicError, storageError }
+      );
+      return null;
+    }
   }
 }
 
@@ -299,13 +337,25 @@ export async function POST(request: NextRequest) {
       limit: 3
     });
     const [cspSkillText, manifestText] = await Promise.all([
-      fetchTextFile(dbCharacter.csp_skill_file_url),
-      fetchTextFile(dbCharacter.manifest_file_url)
+      fetchTextFile(dbCharacter.csp_skill_file_url, supabase),
+      fetchTextFile(dbCharacter.manifest_file_url, supabase)
     ]);
     const timeContext = formatTimeContext(timeZone, lastMessageAt);
+
+    // CSP is mandatory — if a SKILL.md URL exists but fetch failed, log and use system_prompt as emergency fallback
+    const skillMarkdown = (() => {
+      if (cspSkillText) return cspSkillText;
+      if (dbCharacter.csp_skill_file_url) {
+        console.error(
+          `[CSP] SKILL.md fetch failed for character ${dbCharacter.id}, URL: ${dbCharacter.csp_skill_file_url}. Falling back to system_prompt.`
+        );
+      }
+      return dbCharacter.system_prompt || "你正在扮演一个原创动漫角色。";
+    })();
+
     const finalPrompt = buildCharacterPrompt({
       character: dbCharacter,
-      skillMarkdown: cspSkillText || dbCharacter.system_prompt,
+      skillMarkdown,
       manifestJson: manifestText,
       timeInfo: timeContext,
       emotionState: relationshipState?.mood || dbCharacter.mood || "neutral",

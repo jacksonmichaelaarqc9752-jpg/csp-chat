@@ -29,7 +29,15 @@ export default function ChatPage({ params }: { params: { characterId: string } }
   useEffect(() => {
     async function loadChat() {
       if (!configured) {
-        setCharacter(getMockDbCharacter(params.characterId));
+        const mockCharacter = getMockDbCharacter(params.characterId);
+
+        if (!mockCharacter) {
+          setNotice("角色不存在，请从角色列表选择一个角色。");
+          setIsLoading(false);
+          return;
+        }
+
+        setCharacter(mockCharacter);
         setMessages(getMockDbMessages(params.characterId));
         setIsLoading(false);
         return;
@@ -49,7 +57,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         .eq("id", params.characterId)
         .single();
 
-      if (characterError) {
+      if (characterError || !characterData) {
         setNotice("读取角色失败，请稍后重试。");
         setIsLoading(false);
         return;
@@ -65,8 +73,8 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         setNotice("读取聊天记录失败，请稍后重试。");
       }
 
-      setCharacter(characterData);
-      setMessages(messageData ?? []);
+      setCharacter(characterData ?? null);
+      setMessages(Array.isArray(messageData) ? messageData : []);
       setIsLoading(false);
     }
 
@@ -206,7 +214,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
     }
   }
 
-  if (isLoading || !character) {
+  if (isLoading) {
     return (
       <AppShell>
         <div className="grid min-h-screen place-items-center">
@@ -219,8 +227,29 @@ export default function ChatPage({ params }: { params: { characterId: string } }
     );
   }
 
+  if (!character) {
+    return (
+      <AppShell>
+        <div className="grid min-h-screen place-items-center">
+          <GlassPanel className="max-w-md p-6 text-center">
+            <p className="text-base font-semibold text-white">角色不存在</p>
+            <p className="mt-2 text-sm text-slate-300">
+              {notice || "请从角色列表选择一个角色。"}
+            </p>
+            <Link
+              href="/characters"
+              className="mt-5 inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/10 px-4 text-sm text-slate-100"
+            >
+              返回角色列表
+            </Link>
+          </GlassPanel>
+        </div>
+      </AppShell>
+    );
+  }
+
   const visibleMessages =
-    messages.length > 0
+    Array.isArray(messages) && messages.length > 0
       ? messages
       : [
           {
@@ -306,16 +335,16 @@ export default function ChatPage({ params }: { params: { characterId: string } }
                 <div className="mt-5 rounded-2xl bg-white/8 p-4">
                   <div className="flex items-center justify-between">
                     <p className="text-xs text-slate-400">当前情绪</p>
-                    <p className="text-xs text-cyan-100">{character.mood}</p>
+                    <p className="text-xs text-cyan-100">{character.mood ?? "平静"}</p>
                   </div>
                   <p className="mt-4 text-xs text-slate-400">好感度</p>
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-pink-300 to-cyan-200"
-                      style={{ width: `${character.affection}%` }}
+                      style={{ width: `${character.affection ?? 0}%` }}
                     />
                   </div>
-                  <p className="mt-2 text-right text-xs text-pink-100">{character.affection}%</p>
+                  <p className="mt-2 text-right text-xs text-pink-100">{character.affection ?? 0}%</p>
                 </div>
               </div>
             </GlassPanel>
