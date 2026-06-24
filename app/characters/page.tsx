@@ -7,7 +7,6 @@ import { Loader2, LogOut, MessageCircle, Plus, Search, Settings, Sparkles } from
 import { AppShell, BrandMark } from "@/components/app-shell";
 import { GlassPanel, GhostLink, Tag } from "@/components/ui";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { getMockDbCharacters } from "@/lib/supabase/mock-fallback";
 import { DbCharacter } from "@/lib/supabase/types";
 
 export default function CharactersPage() {
@@ -21,7 +20,8 @@ export default function CharactersPage() {
   useEffect(() => {
     async function loadCharacters() {
       if (!configured) {
-        setCharacters(getMockDbCharacters());
+        setNotice("未配置 Supabase 环境变量（NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY），无法加载角色列表。");
+        setCharacters([]);
         setIsLoading(false);
         return;
       }

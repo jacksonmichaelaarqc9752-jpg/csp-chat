@@ -8,7 +8,6 @@ import { AppShell } from "@/components/app-shell";
 import { GlassPanel, Tag } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { getMockDbCharacter, getMockDbMessages } from "@/lib/supabase/mock-fallback";
 import { DbCharacter, DbMessage } from "@/lib/supabase/types";
 import { formatTime } from "@/lib/format";
 
@@ -29,16 +28,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
   useEffect(() => {
     async function loadChat() {
       if (!configured) {
-        const mockCharacter = getMockDbCharacter(params.characterId);
-
-        if (!mockCharacter) {
-          setNotice("角色不存在，请从角色列表选择一个角色。");
-          setIsLoading(false);
-          return;
-        }
-
-        setCharacter(mockCharacter);
-        setMessages(getMockDbMessages(params.characterId));
+        setNotice("未配置 Supabase 环境变量（NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY），无法加载聊天。");
         setIsLoading(false);
         return;
       }
@@ -138,33 +128,9 @@ export default function ChatPage({ params }: { params: { characterId: string } }
     setNotice("");
 
     if (!configured) {
-      const now = new Date().toISOString();
-      const imageUrl = selectedImagePreview;
-      const userMessage: DbMessage = {
-        id: crypto.randomUUID(),
-        user_id: "mock-user",
-        character_id: character.id,
-        role: "user",
-        content: content || "[图片]",
-        image_url: imageUrl,
-        metadata: {},
-        created_at: now
-      };
-      const assistantMessage: DbMessage = {
-        id: crypto.randomUUID(),
-        user_id: "mock-user",
-        character_id: character.id,
-        role: "assistant",
-        content: "这是模拟回复。配置 Supabase 和 AI 环境变量后，系统会分析图片并保存聊天记录。",
-        image_url: null,
-        metadata: {},
-        created_at: new Date(Date.now() + 500).toISOString()
-      };
-
-      setMessages((current) => [...current, userMessage, assistantMessage]);
-      clearSelectedImage();
+      setNotice("未配置 Supabase，无法发送消息。请设置 NEXT_PUBLIC_SUPABASE_URL 和 NEXT_PUBLIC_SUPABASE_ANON_KEY 环境变量。");
+      setInput(content);
       setIsSending(false);
-      textareaRef.current?.focus();
       return;
     }
 
@@ -208,6 +174,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       setIsSending(false);
       textareaRef.current?.focus();
     } catch (error) {
+      console.error("[CHAT] sendMessage failed:", error);
       setNotice(error instanceof Error ? error.message : "发送失败，请稍后重试。");
       setInput(content);
       setIsSending(false);

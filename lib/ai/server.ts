@@ -27,8 +27,10 @@ export async function callChatModel(messages: ChatCompletionMessage[]) {
   const model = process.env.AI_MODEL;
 
   if (!model) {
-    throw new Error("Missing AI_MODEL");
+    throw new Error("Missing AI_MODEL environment variable");
   }
+
+  console.log(`[AI] Calling chat model: ${model} at ${baseUrl}`);
 
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -46,16 +48,20 @@ export async function callChatModel(messages: ChatCompletionMessage[]) {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`AI request failed: ${response.status} ${detail}`);
+    const errorMsg = `AI request failed: ${response.status} ${detail}`;
+    console.error(`[AI] ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
 
   if (!content || typeof content !== "string") {
+    console.error("[AI] Response did not include message content:", JSON.stringify(data).substring(0, 500));
     throw new Error("AI response did not include message content");
   }
 
+  console.log(`[AI] Response received: ${content.length} chars`);
   return content.trim();
 }
 

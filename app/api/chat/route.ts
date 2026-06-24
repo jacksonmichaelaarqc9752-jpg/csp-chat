@@ -445,6 +445,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown server error";
+    console.error("[API /chat] Error:", message, error instanceof Error ? error.stack : "");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
