@@ -8,6 +8,94 @@ import { AppShell, BrandMark } from "@/components/app-shell";
 import { GlassPanel, PrimaryButton, TextArea, TextInput, Tag } from "@/components/ui";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
+function extractSection(markdown: string, headings: string[]): string {
+  const pattern = new RegExp(
+    `##\\s*(${headings.join("|")})\\s*\\n+([\\s\\S]*?)(?=\\n##\\s|\\n#\\s|$)`,
+    "i"
+  );
+  const match = markdown.match(pattern);
+  return match?.[2]?.trim() || "";
+}
+
+function parseSkillLocally(skillText: string, manifestText: string | null): ImportedCharacter {
+  // Try manifest.json first for structured data
+  let manifestData: Record<string, unknown> = {};
+  if (manifestText) {
+    try {
+      manifestData = JSON.parse(manifestText);
+    } catch { /* ignore invalid JSON */ }
+  }
+
+  // Extract name: first H1 heading, or manifest "name", or "name:" field
+  const h1Match = skillText.match(/^#\s+(.+)$/m);
+  const nameMatch = skillText.match(/^name\s*[:：]\s*(.+)$/im);
+  const name = (manifestData.name as string) || h1Match?.[1]?.trim() || nameMatch?.[1]?.trim() || "";
+
+  // Extract subtitle: blockquote after H1, or manifest
+  const subtitleMatch = skillText.match(/^>\s*(.+)$/m);
+  const subtitle = (manifestData.subtitle as string) || subtitleMatch?.[1]?.trim() || "";
+
+  // Extract description: first paragraph after H1 (before any ## heading)
+  const descMatch = skillText.match(/^#\s+.+\n+(?:>\s*.+\n+)?\n*([\s\S]*?)(?=\n##\s|$)/);
+  const firstParagraphs = descMatch?.[1]
+    ?.split(/\n\n+/)
+    .filter((p) => p.trim() && !p.trim().startsWith("#") && !p.trim().startsWith(">"))
+    .slice(0, 2)
+    .join("\n\n")
+    .trim() || "";
+  const description = (manifestData.description as string) || firstParagraphs || "";
+
+  // Extract personality
+  const personality =
+    (manifestData.personality as string) ||
+    extractSection(skillText, [
+      "性格", "性格设定", "个性", "personality", "角色性格",
+      "人设", "表达质感", "说话方式", "口吻"
+    ]);
+
+  // Extract scenario / background
+  const scenario =
+    (manifestData.scenario as string) ||
+    extractSection(skillText, [
+      "世界观", "背景", "场景", "设定", "world", "scenario",
+      "背景设定", "世界观设定", "关系", "处境"
+    ]);
+
+  // Extract greeting / first message
+  const greeting =
+    (manifestData.greeting_message as string) ||
+    (manifestData.greetingMessage as string) ||
+    extractSection(skillText, [
+      "开场白", "第一句话", "问候", "greeting", "first message",
+      "打招呼", "初次见面"
+    ]);
+
+  // Extract tags
+  const tagsFromManifest = (manifestData.tags as string[]) || [];
+  const tagsSection = extractSection(skillText, ["标签", "tags", "tag"]);
+  const tagsFromSkill = tagsSection
+    ? tagsSection.split(/[,，、\n]/).map((t) => t.trim()).filter(Boolean)
+    : [];
+  const tags = tagsFromManifest.length > 0 ? tagsFromManifest : (tagsFromSkill.length > 0 ? tagsFromSkill : ["原创", "私有角色"]);
+
+  // Distilled profile: use distillation section or entire skill text
+  const distilledSection =
+    extractSection(skillText, ["蒸馏", "distilled", "核心设定", "角色摘要", "浓缩"]);
+  const distilled_profile = distilledSection || skillText;
+
+  return {
+    name,
+    subtitle,
+    description,
+    tags,
+    greeting_message: greeting,
+    personality,
+    scenario,
+    system_prompt: skillText,
+    distilled_profile
+  };
+}
+
 type ImportedCharacter = {
   name?: string;
   subtitle?: string;
@@ -181,6 +269,7 @@ export default function NewCharacterPage() {
   }
 
   async function importCspSkill() {
+    console.log("[CSP IMPORT] importCspSkill triggered");
     setMessage("");
     const errors = [
       validateFileName(skillFile, "SKILL.md", true),
@@ -190,20 +279,32 @@ export default function NewCharacterPage() {
 
     if (errors.length) {
       setMessage(errors.join(" "));
+      console.log("[CSP IMPORT] Validation failed:", errors);
       return;
     }
 
     setIsImporting(true);
+    console.log("[CSP IMPORT] Reading files...");
 
     try {
       const skillText = await skillFile!.text();
       const manifestText = manifestFile ? await manifestFile.text() : null;
       const distillationText = distillationFile ? await distillationFile.text() : null;
 
+      console.log("[CSP IMPORT] Files read", {
+        skillLength: skillText.length,
+        hasManifest: !!manifestText,
+        hasDistillation: !!distillationText,
+        configured
+      });
+
       if (!configured) {
-        setSystemPrompt(skillText);
-        setDistilledProfile(distillationText || skillText);
-        setMessage("本地预览模式：已读取 SKILL.md 文件内容。配置 Supabase 后才能创建角色。");
+        // 本地模式：用本地正则解析 SKILL.md 提取结构化字段
+        console.log("[CSP IMPORT] Local mode — parsing SKILL.md locally");
+        const parsed = parseSkillLocally(skillText, manifestText);
+        console.log("[CSP PARSE RESULT]", parsed);
+        applyImportedCharacter(parsed);
+        setMessage("本地预览模式：已解析 SKILL.md 并自动填充表单。配置 Supabase 后才能创建角色。");
         return;
       }
 
@@ -225,16 +326,21 @@ export default function NewCharacterPage() {
         body: JSON.stringify({ skillText, manifestText, distillationText })
       });
 
+      console.log("[CSP IMPORT] API response status:", response.status);
       const data = await response.json();
+      console.log("[CSP IMPORT] API response data keys:", Object.keys(data));
 
       if (!response.ok) {
+        console.error("[CSP IMPORT] API error:", data.error);
         setMessage(data.error || "解析 CSP 文件失败，请稍后重试。");
         return;
       }
 
+      console.log("[CSP PARSE RESULT]", data.character);
       applyImportedCharacter(data.character);
       setMessage("CSP 文件已解析并填入表单。");
-    } catch {
+    } catch (err) {
+      console.error("[CSP IMPORT] Exception:", err);
       setMessage("读取或解析文件失败，请检查文件内容后重试。");
     } finally {
       setIsImporting(false);
