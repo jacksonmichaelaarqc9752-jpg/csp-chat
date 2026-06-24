@@ -154,14 +154,8 @@ type CreatedCharacter = {
 };
 
 type CreateCharacterResult =
-  | {
-      success: true;
-      character: CreatedCharacter;
-    }
-  | {
-      success: false;
-      error?: string;
-    };
+  | { success: true; character: CreatedCharacter; error?: undefined }
+  | { success: false; error?: string; character?: undefined };
 
 const characterAssetsBucket = "character-assets";
 const defaultBanner =
@@ -211,7 +205,11 @@ async function createCharacter(
     body: JSON.stringify(payload)
   });
 
-  const result = (await response.json()) as CreateCharacterResult;
+  const result = (await response.json()) as {
+    success?: boolean;
+    character?: CreatedCharacter;
+    error?: string;
+  };
 
   console.log("[CREATE CHARACTER] raw response:", result);
 
