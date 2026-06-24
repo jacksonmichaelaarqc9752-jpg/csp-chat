@@ -58,6 +58,14 @@ export default function ChatPage({ params }: { params: { characterId: string } }
 
       console.log("[CHAT LOAD] character loaded:", { id: characterData.id, name: characterData.name });
 
+      // 硬守卫：加载的角色 ID 必须等于 URL param
+      if (characterData.id !== params.characterId) {
+        console.error("[CHAT ERROR] ID MISMATCH!", { urlId: params.characterId, loadedId: characterData.id });
+        setNotice(`角色ID不匹配。URL期望: ${params.characterId}，实际加载: ${characterData.id}。请返回角色列表重新进入。`);
+        setIsLoading(false);
+        return;
+      }
+
       const { data: messageData, error: messageError } = await supabase
         .from("messages")
         .select("*")

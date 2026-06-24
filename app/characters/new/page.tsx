@@ -458,7 +458,22 @@ export default function NewCharacterPage() {
         return;
       }
 
+      // 二次验证：从 Supabase 直接查询确认角色已写入
+      const { data: verifyData, error: verifyError } = await supabase
+        .from("characters")
+        .select("id")
+        .eq("id", res.character.id)
+        .single();
+
+      if (verifyError || !verifyData?.id) {
+        console.error("[CREATE CHARACTER] Verification failed:", verifyError);
+        setMessage("角色创建后验证失败，请刷新页面后重试。");
+        return;
+      }
+
+      console.log("[CREATE CHARACTER] Verified, redirecting to:", res.character.id);
       router.push(`/chat/${res.character.id}`);
+      router.refresh();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "创建角色失败，请稍后重试。";
       setMessage(errorMessage);
