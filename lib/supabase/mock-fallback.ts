@@ -31,7 +31,8 @@ export function getMockDbCharacters() {
 }
 
 export function getMockDbCharacter(id: string) {
-  return mockCharacterToDb(characters.find((character) => character.id === id) ?? characters[0]);
+  const character = characters.find((candidate) => candidate.id === id);
+  return character ? mockCharacterToDb(character) : null;
 }
 
 export function mockMessageToDb(message: ChatMessage, characterId: string): DbMessage {

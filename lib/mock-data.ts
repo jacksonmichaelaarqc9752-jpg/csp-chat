@@ -117,7 +117,7 @@ export const initialMessages: Record<string, ChatMessage[]> = {
 };
 
 export function getCharacter(id: string) {
-  return characters.find((character) => character.id === id) ?? characters[0];
+  return characters.find((character) => character.id === id) ?? null;
 }
 
 export function makeMockReply(character: Character, input: string) {
