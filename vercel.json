@@ -1,0 +1,17 @@
+{
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "functions": {
+    "app/api/chat/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/vision/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/characters/import-csp/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

@@ -1,0 +1,176 @@
+export type ChatCompletionMessage = {
+  role: "system" | "user" | "assistant";
+  content:
+    | string
+    | Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string } }
+      >;
+};
+
+function getAiConfig() {
+  const apiKey = process.env.AI_API_KEY;
+  const baseUrl = process.env.AI_BASE_URL || "https://api.openai.com/v1";
+
+  if (!apiKey) {
+    throw new Error("Missing AI_API_KEY");
+  }
+
+  return {
+    apiKey,
+    baseUrl: baseUrl.replace(/\/$/, "")
+  };
+}
+
+export async function callChatModel(messages: ChatCompletionMessage[]) {
+  const { apiKey, baseUrl } = getAiConfig();
+  const model = process.env.AI_MODEL;
+
+  if (!model) {
+    throw new Error("Missing AI_MODEL");
+  }
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: 0.85,
+      max_tokens: 800
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`AI request failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+
+  if (!content || typeof content !== "string") {
+    throw new Error("AI response did not include message content");
+  }
+
+  return content.trim();
+}
+
+export async function callJsonModel<T>(messages: ChatCompletionMessage[], fallback: T) {
+  try {
+    const { apiKey, baseUrl } = getAiConfig();
+    const model = process.env.AI_MODEL;
+
+    if (!model) return fallback;
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.2,
+        max_tokens: 700,
+        response_format: { type: "json_object" }
+      })
+    });
+
+    if (!response.ok) return fallback;
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content || typeof content !== "string") return fallback;
+
+    return JSON.parse(content) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function createEmbedding(input: string) {
+  const { apiKey, baseUrl } = getAiConfig();
+  const model = process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+
+  const response = await fetch(`${baseUrl}/embeddings`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      input
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Embedding request failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  const embedding = data?.data?.[0]?.embedding;
+
+  if (!Array.isArray(embedding)) {
+    throw new Error("Embedding response did not include an embedding array");
+  }
+
+  return embedding as number[];
+}
+
+export async function describeImage(imageUrl: string) {
+  const { apiKey, baseUrl } = getAiConfig();
+  const model = process.env.AI_VISION_MODEL || process.env.AI_MODEL;
+
+  if (!model) {
+    throw new Error("Missing AI_VISION_MODEL or AI_MODEL");
+  }
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Describe this image for an anime roleplay chat. Mention visible people, objects, mood, setting, and any details the character may naturally react to. Keep it concise."
+            },
+            {
+              type: "image_url",
+              image_url: { url: imageUrl }
+            }
+          ]
+        }
+      ],
+      temperature: 0.2,
+      max_tokens: 350
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Vision request failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+
+  if (!content || typeof content !== "string") {
+    throw new Error("Vision response did not include description content");
+  }
+
+  return content.trim();
+}
