@@ -1,3 +1,5 @@
+import { assertVisibleAsciiHeaderValue, normalizeHeaderToken } from "@/lib/http/safeHeaders";
+
 export type ChatCompletionMessage = {
   role: "system" | "user" | "assistant";
   content:
@@ -9,12 +11,14 @@ export type ChatCompletionMessage = {
 };
 
 function getAiConfig() {
-  const apiKey = process.env.AI_API_KEY;
+  const apiKey = normalizeHeaderToken(process.env.AI_API_KEY);
   const baseUrl = process.env.AI_BASE_URL || "https://api.openai.com/v1";
 
   if (!apiKey) {
     throw new Error("Missing AI_API_KEY");
   }
+
+  assertVisibleAsciiHeaderValue("AI_API_KEY", apiKey);
 
   return {
     apiKey,

@@ -7,6 +7,7 @@ import { ArrowLeft, FileText, ImagePlus, Loader2, Save, UploadCloud, Wand2 } fro
 import { AppShell, BrandMark } from "@/components/app-shell";
 import { GlassPanel, PrimaryButton, TextArea, TextInput, Tag } from "@/components/ui";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { createBearerAuthHeader } from "@/lib/http/safeHeaders";
 
 function extractSection(markdown: string, headings: string[]): string {
   const pattern = new RegExp(
@@ -199,7 +200,7 @@ async function createCharacter(
   const response = await fetch("/api/characters", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: createBearerAuthHeader(accessToken),
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
@@ -343,7 +344,7 @@ export default function NewCharacterPage() {
       const response = await fetch("/api/characters/import-csp", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: createBearerAuthHeader(accessToken),
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ skillText, manifestText, distillationText })

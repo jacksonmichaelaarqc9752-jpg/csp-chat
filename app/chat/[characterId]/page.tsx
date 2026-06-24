@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { DbCharacter, DbMessage } from "@/lib/supabase/types";
 import { formatTime } from "@/lib/format";
+import { createBearerAuthHeader } from "@/lib/http/safeHeaders";
 
 export default function ChatPage({ params }: { params: { characterId: string } }) {
   const router = useRouter();
@@ -163,7 +164,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: createBearerAuthHeader(accessToken),
           "Content-Type": "application/json"
         },
         body: JSON.stringify({

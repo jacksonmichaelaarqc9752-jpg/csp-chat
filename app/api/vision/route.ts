@@ -1,18 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { describeImage } from "@/lib/ai/server";
+import {
+  assertVisibleAsciiHeaderValue,
+  getBearerTokenFromHeader,
+  normalizeHeaderToken
+} from "@/lib/http/safeHeaders";
 
 type VisionRequestBody = {
   imageUrl?: string;
 };
 
 function createServerSupabaseClient(accessToken: string) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ?.replace(/\/rest\/v1\/?$/, "")
+    .replace(/\/$/, "");
+  const supabaseAnonKey = normalizeHeaderToken(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Missing Supabase environment variables");
   }
+
+  assertVisibleAsciiHeaderValue("NEXT_PUBLIC_SUPABASE_ANON_KEY", supabaseAnonKey);
 
   return createClient(supabaseUrl, supabaseAnonKey, {
     global: {
@@ -26,9 +35,7 @@ function createServerSupabaseClient(accessToken: string) {
 }
 
 function getBearerToken(request: NextRequest) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return null;
-  return authorization.slice("Bearer ".length);
+  return getBearerTokenFromHeader(request.headers.get("authorization"));
 }
 
 export async function POST(request: NextRequest) {
