@@ -130,10 +130,33 @@ type CreateCharacterPayload = {
   systemPrompt: string;
 };
 
+type CreatedCharacter = {
+  id: string;
+  user_id: string;
+  name: string;
+  subtitle: string | null;
+  description: string | null;
+  avatar_url: string | null;
+  banner_url: string | null;
+  csp_skill_file_url: string | null;
+  manifest_file_url: string | null;
+  distillation_file_url: string | null;
+  tags: string[];
+  greeting_message: string | null;
+  personality: string | null;
+  scenario: string | null;
+  system_prompt: string;
+  distilled_profile: string | null;
+  affection: number;
+  mood: string;
+  created_at: string;
+  updated_at: string;
+};
+
 type CreateCharacterResult =
   | {
       success: true;
-      id: string;
+      character: CreatedCharacter;
     }
   | {
       success: false;
@@ -190,14 +213,16 @@ async function createCharacter(
 
   const result = (await response.json()) as CreateCharacterResult;
 
-  if (!response.ok || !result?.success || !result?.id) {
+  console.log("[CREATE CHARACTER] raw response:", result);
+
+  if (!response.ok || !result?.success || !result?.character?.id) {
     return {
       success: false,
       error: result?.error || "创建角色失败，请稍后重试。"
     } satisfies CreateCharacterResult;
   }
 
-  return { success: true, id: result.id };
+  return { success: true, character: result.character };
 }
 
 export default function NewCharacterPage() {
@@ -426,14 +451,14 @@ export default function NewCharacterPage() {
         systemPrompt
       });
 
-      console.log("createCharacter result:", res);
+      console.log("[CREATE CHARACTER]", res);
 
-      if (!res.success || !res.id) {
+      if (!res.success || !res.character?.id) {
         setMessage(res.error || "创建角色失败，请检查必填项后重试。");
         return;
       }
 
-      router.push(`/chat/${res.id}`);
+      router.push(`/chat/${res.character.id}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "创建角色失败，请稍后重试。";
       setMessage(errorMessage);

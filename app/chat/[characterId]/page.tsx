@@ -27,6 +27,8 @@ export default function ChatPage({ params }: { params: { characterId: string } }
 
   useEffect(() => {
     async function loadChat() {
+      console.log("[CHAT LOAD]", params.characterId);
+
       if (!configured) {
         setNotice("未配置 Supabase 环境变量（NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY），无法加载聊天。");
         setIsLoading(false);
@@ -48,10 +50,13 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         .single();
 
       if (characterError || !characterData) {
-        setNotice("读取角色失败，请稍后重试。");
+        console.error("[CHAT ERROR] loadCharacter failed:", { characterId: params.characterId, error: characterError });
+        setNotice(`读取角色失败：${characterError?.message || "角色不存在"}。`);
         setIsLoading(false);
         return;
       }
+
+      console.log("[CHAT LOAD] character loaded:", { id: characterData.id, name: characterData.name });
 
       const { data: messageData, error: messageError } = await supabase
         .from("messages")
@@ -60,6 +65,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         .order("created_at", { ascending: true });
 
       if (messageError) {
+        console.error("[CHAT ERROR] loadMessages failed:", { characterId: params.characterId, error: messageError });
         setNotice("读取聊天记录失败，请稍后重试。");
       }
 
@@ -163,7 +169,8 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       const data = await response.json();
 
       if (!response.ok) {
-        setNotice("AI 回复失败，请稍后重试。");
+        console.error("[CHAT ERROR] /api/chat failed:", { status: response.status, error: data.error, characterId: character.id });
+        setNotice(data.error || "AI 回复失败，请稍后重试。");
         setInput(content);
         setIsSending(false);
         return;
