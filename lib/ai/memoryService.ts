@@ -1,5 +1,5 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { callJsonModel, createEmbedding } from "@/lib/ai/server";
+import { AiProviderConfig, callJsonModel, createEmbedding } from "@/lib/ai/server";
 import { DbMessage } from "@/lib/supabase/types";
 
 export type RetrievedMemory = {
@@ -27,18 +27,20 @@ export async function retrieveRelevantMemories({
   userId,
   characterId,
   query,
-  limit = 3
+  limit = 3,
+  aiConfig
 }: {
   supabase: SupabaseClient;
   userId: string;
   characterId: string;
   query: string;
   limit?: number;
+  aiConfig: AiProviderConfig;
 }) {
   if (!query.trim()) return [];
 
   try {
-    const embedding = await createEmbedding(query);
+    const embedding = await createEmbedding(query, aiConfig);
     const { data, error } = await supabase.rpc("match_memories", {
       query_embedding: embedding,
       match_user_id: userId,
@@ -58,12 +60,14 @@ export async function maybeExtractAndStoreMemory({
   supabase,
   userId,
   characterId,
-  userMessage
+  userMessage,
+  aiConfig
 }: {
   supabase: SupabaseClient;
   userId: string;
   characterId: string;
   userMessage: DbMessage;
+  aiConfig: AiProviderConfig;
 }) {
   const userContent = userMessage.content.trim();
   if (userContent.length < 8 || userContent === "[Image]") return null;
@@ -92,13 +96,14 @@ export async function maybeExtractAndStoreMemory({
         })
       }
     ],
-    memoryFallback
+    memoryFallback,
+    aiConfig
   );
 
   const memory = decision.memory?.trim();
   if (!decision.should_remember || !memory || memory.length < 8) return null;
 
-  const embedding = await createEmbedding(memory);
+  const embedding = await createEmbedding(memory, aiConfig);
   const duplicate = await findDuplicateMemory({
     supabase,
     userId,

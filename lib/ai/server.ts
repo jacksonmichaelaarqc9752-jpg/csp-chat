@@ -1,5 +1,11 @@
 import { assertVisibleAsciiHeaderValue, normalizeHeaderToken } from "@/lib/http/safeHeaders";
 
+export type AiProviderConfig = {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+};
+
 export type ChatCompletionMessage = {
   role: "system" | "user" | "assistant";
   content:
@@ -10,33 +16,30 @@ export type ChatCompletionMessage = {
       >;
 };
 
-function getAiConfig() {
-  const apiKey = normalizeHeaderToken(process.env.AI_API_KEY);
-  const baseUrl = process.env.AI_BASE_URL || "https://api.openai.com/v1";
+export function normalizeAiProviderConfig(config: Partial<AiProviderConfig> | null | undefined): AiProviderConfig {
+  const apiKey = normalizeHeaderToken(config?.apiKey);
+  const baseURL = config?.baseURL?.trim().replace(/\/$/, "") || "";
+  const model = config?.model?.trim() || "";
 
-  if (!apiKey) {
-    throw new Error("Missing AI_API_KEY");
+  if (!apiKey || !baseURL || !model) {
+    throw new Error("请先在设置页填写 AI API Key、Base URL 和模型名称。");
   }
 
-  assertVisibleAsciiHeaderValue("AI_API_KEY", apiKey);
+  assertVisibleAsciiHeaderValue("AI API Key", apiKey);
 
   return {
     apiKey,
-    baseUrl: baseUrl.replace(/\/$/, "")
+    baseURL,
+    model
   };
 }
 
-export async function callChatModel(messages: ChatCompletionMessage[]) {
-  const { apiKey, baseUrl } = getAiConfig();
-  const model = process.env.AI_MODEL;
+export async function callChatModel(messages: ChatCompletionMessage[], config: AiProviderConfig) {
+  const { apiKey, baseURL, model } = normalizeAiProviderConfig(config);
 
-  if (!model) {
-    throw new Error("Missing AI_MODEL environment variable");
-  }
+  console.log(`[AI] Calling chat model: ${model} at ${baseURL}`);
 
-  console.log(`[AI] Calling chat model: ${model} at ${baseUrl}`);
-
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const response = await fetch(`${baseURL}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -69,14 +72,16 @@ export async function callChatModel(messages: ChatCompletionMessage[]) {
   return content.trim();
 }
 
-export async function callJsonModel<T>(messages: ChatCompletionMessage[], fallback: T) {
+export async function callJsonModel<T>(
+  messages: ChatCompletionMessage[],
+  fallback: T,
+  config?: AiProviderConfig | null
+) {
   try {
-    const { apiKey, baseUrl } = getAiConfig();
-    const model = process.env.AI_MODEL;
+    if (!config) return fallback;
+    const { apiKey, baseURL, model } = normalizeAiProviderConfig(config);
 
-    if (!model) return fallback;
-
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${baseURL}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -103,11 +108,11 @@ export async function callJsonModel<T>(messages: ChatCompletionMessage[], fallba
   }
 }
 
-export async function createEmbedding(input: string) {
-  const { apiKey, baseUrl } = getAiConfig();
+export async function createEmbedding(input: string, config: AiProviderConfig) {
+  const { apiKey, baseURL } = normalizeAiProviderConfig(config);
   const model = process.env.EMBEDDING_MODEL || "text-embedding-3-small";
 
-  const response = await fetch(`${baseUrl}/embeddings`, {
+  const response = await fetch(`${baseURL}/embeddings`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -134,15 +139,10 @@ export async function createEmbedding(input: string) {
   return embedding as number[];
 }
 
-export async function describeImage(imageUrl: string) {
-  const { apiKey, baseUrl } = getAiConfig();
-  const model = process.env.AI_VISION_MODEL || process.env.AI_MODEL;
+export async function describeImage(imageUrl: string, config: AiProviderConfig) {
+  const { apiKey, baseURL, model } = normalizeAiProviderConfig(config);
 
-  if (!model) {
-    throw new Error("Missing AI_VISION_MODEL or AI_MODEL");
-  }
-
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const response = await fetch(`${baseURL}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { describeImage } from "@/lib/ai/server";
+import { AiProviderConfig, describeImage, normalizeAiProviderConfig } from "@/lib/ai/server";
 import {
   assertVisibleAsciiHeaderValue,
   getBearerTokenFromHeader,
@@ -9,6 +9,7 @@ import {
 
 type VisionRequestBody = {
   imageUrl?: string;
+  aiConfig?: Partial<AiProviderConfig> | null;
 };
 
 function createServerSupabaseClient(accessToken: string) {
@@ -47,6 +48,7 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json()) as VisionRequestBody;
     const imageUrl = body.imageUrl?.trim();
+    const aiConfig = normalizeAiProviderConfig(body.aiConfig);
 
     if (!imageUrl) {
       return NextResponse.json({ error: "imageUrl is required" }, { status: 400 });
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const description = await describeImage(imageUrl);
+    const description = await describeImage(imageUrl, aiConfig);
     return NextResponse.json({ description });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown server error";

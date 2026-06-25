@@ -54,6 +54,27 @@ async function readJsonResponse(response: Response) {
   }
 }
 
+function readLocalAiConfig() {
+  try {
+    const raw = localStorage.getItem("ai_config");
+    if (!raw) return null;
+
+    const config = JSON.parse(raw) as {
+      apiKey?: string;
+      baseURL?: string;
+      model?: string;
+    };
+    const apiKey = config.apiKey?.trim();
+    const baseURL = config.baseURL?.trim();
+    const model = config.model?.trim();
+
+    if (!apiKey || !baseURL || !model) return null;
+    return { apiKey, baseURL, model };
+  } catch {
+    return null;
+  }
+}
+
 export default function ChatPage({ params }: { params: { characterId: string } }) {
   const router = useRouter();
   const [character, setCharacter] = useState<DbCharacter | null>(null);
@@ -223,6 +244,12 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       return;
     }
 
+    const aiConfig = readLocalAiConfig();
+    if (!aiConfig) {
+      setNotice("请先到设置页填写 AI API Key、Base URL 和模型名称。");
+      return;
+    }
+
     const optimisticMessage: DbMessage = {
       id: `local-${crypto.randomUUID()}`,
       user_id: character.user_id,
@@ -263,6 +290,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
           characterId: chatId,
           content,
           imageUrl,
+          aiConfig,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
         })
       });

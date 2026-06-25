@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { buildCharacterPrompt } from "@/lib/ai/promptBuilder";
 import { maybeExtractAndStoreMemory, retrieveRelevantMemories } from "@/lib/ai/memoryService";
-import { callChatModel, callJsonModel, describeImage } from "@/lib/ai/server";
+import { AiProviderConfig, callChatModel, callJsonModel, describeImage, normalizeAiProviderConfig } from "@/lib/ai/server";
 import { DbCharacter, DbMessage, DbRelationshipState } from "@/lib/supabase/types";
 import {
   assertVisibleAsciiHeaderValue,
@@ -17,6 +17,7 @@ type ChatRequestBody = {
   imageDescription?: string | null;
   timeZone?: string;
   debug?: boolean;
+  aiConfig?: Partial<AiProviderConfig> | null;
 };
 
 type ReflectionResult = {
@@ -230,7 +231,8 @@ async function reflectAfterChat({
   characterName,
   userContent,
   assistantContent,
-  relationshipState
+  relationshipState,
+  aiConfig
 }: {
   supabase: ReturnType<typeof createServerSupabaseClient>;
   userId: string;
@@ -239,6 +241,7 @@ async function reflectAfterChat({
   userContent: string;
   assistantContent: string;
   relationshipState: DbRelationshipState | null;
+  aiConfig: AiProviderConfig;
 }) {
   const reflection = await callJsonModel<ReflectionResult>(
     [
@@ -266,7 +269,8 @@ async function reflectAfterChat({
       mood: relationshipState?.mood || "neutral",
       affection_delta: 0,
       state_summary: relationshipState?.state_summary || null
-    }
+    },
+    aiConfig
   );
 
   const currentAffection = relationshipState?.affection ?? 0;
@@ -302,6 +306,7 @@ export async function POST(request: NextRequest) {
     const content = body.content?.trim();
     const imageUrl = body.imageUrl?.trim() || null;
     const timeZone = body.timeZone || "Asia/Singapore";
+    const aiConfig = normalizeAiProviderConfig(body.aiConfig);
 
     if (!characterId || (!content && !imageUrl)) {
       return NextResponse.json(
@@ -346,7 +351,7 @@ export async function POST(request: NextRequest) {
     const chronologicalMessages = [...((recentMessages ?? []) as unknown[])].reverse().map(normalizeDbMessage);
     const lastMessageAt = chronologicalMessages.at(-1)?.created_at;
     const imageDescription =
-      body.imageDescription?.trim() || (imageUrl ? await describeImage(imageUrl) : null);
+      body.imageDescription?.trim() || (imageUrl ? await describeImage(imageUrl, aiConfig) : null);
     const userContent = [content || "", imageDescription ? `[Image description]\n${imageDescription}` : ""]
       .filter(Boolean)
       .join("\n\n");
@@ -362,7 +367,8 @@ export async function POST(request: NextRequest) {
       userId,
       characterId,
       query: userContent || content || "",
-      limit: 3
+      limit: 3,
+      aiConfig
     });
     const [cspSkillText, manifestText] = await Promise.all([
       fetchTextFile(dbCharacter.csp_skill_file_url, supabase),
@@ -394,7 +400,7 @@ export async function POST(request: NextRequest) {
       imageDescription
     });
 
-    const assistantContent = await callChatModel([{ role: "system", content: finalPrompt }]);
+    const assistantContent = await callChatModel([{ role: "system", content: finalPrompt }], aiConfig);
 
     const { data: userMessage, error: userMessageError } = await supabase
       .from("messages")
@@ -426,7 +432,7 @@ export async function POST(request: NextRequest) {
         content: assistantContent,
         metadata: {
           source: "ai",
-          model: process.env.AI_MODEL,
+          model: aiConfig.model,
           prompt_debug_enabled: Boolean(body.debug || process.env.PROMPT_DEBUG === "true"),
           time_context: timeContext,
           memories_used: relevantMemories,
@@ -446,7 +452,8 @@ export async function POST(request: NextRequest) {
       supabase,
       userId,
       characterId,
-      userMessage: userMessage as DbMessage
+      userMessage: userMessage as DbMessage,
+      aiConfig
     }).catch(() => null);
 
     await supabase
@@ -461,7 +468,8 @@ export async function POST(request: NextRequest) {
       characterName: dbCharacter.name,
       userContent,
       assistantContent,
-      relationshipState
+      relationshipState,
+      aiConfig
     });
 
     return NextResponse.json({
