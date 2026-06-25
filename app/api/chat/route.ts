@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { buildCharacterPrompt } from "@/lib/ai/promptBuilder";
 import { maybeExtractAndStoreMemory, retrieveRelevantMemories } from "@/lib/ai/memoryService";
-import { AiProviderConfig, callChatModel, callJsonModel, describeImage, normalizeAiProviderConfig } from "@/lib/ai/server";
+import { AiProviderConfig, callJsonModel, describeImage, normalizeAiProviderConfig, streamChatModel } from "@/lib/ai/server";
 import { DbCharacter, DbMessage, DbRelationshipState } from "@/lib/supabase/types";
 import {
   assertVisibleAsciiHeaderValue,
@@ -25,6 +25,8 @@ type ReflectionResult = {
   affection_delta?: number;
   state_summary?: string | null;
 };
+
+const textFileCache = new Map<string, Promise<string | null>>();
 
 function normalizeDbMessage(message: unknown): DbMessage {
   const value = message as Partial<DbMessage> & { metadata?: Record<string, unknown> };
@@ -190,6 +192,30 @@ async function fetchTextFile(
   }
 }
 
+async function fetchCachedTextFile({
+  url,
+  supabase,
+  label
+}: {
+  url: string | null | undefined;
+  supabase: ReturnType<typeof createServerSupabaseClient>;
+  label: string;
+}) {
+  const start = Date.now();
+  if (!url) {
+    console.log(`[PERF] ${label} load time 0ms missing`);
+    return null;
+  }
+
+  if (!textFileCache.has(url)) {
+    textFileCache.set(url, fetchTextFile(url, supabase));
+  }
+
+  const text = await textFileCache.get(url)!;
+  console.log(`[PERF] ${label} load time ${Date.now() - start}ms ${text ? "hit" : "empty"}`);
+  return text;
+}
+
 async function getOrCreateRelationshipState({
   supabase,
   userId,
@@ -341,7 +367,7 @@ export async function POST(request: NextRequest) {
       .select("*")
       .eq("character_id", characterId)
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(8);
 
     if (recentMessagesError) {
       return NextResponse.json({ error: recentMessagesError.message }, { status: 500 });
@@ -371,8 +397,16 @@ export async function POST(request: NextRequest) {
       aiConfig
     });
     const [cspSkillText, manifestText] = await Promise.all([
-      fetchTextFile(dbCharacter.csp_skill_file_url, supabase),
-      fetchTextFile(dbCharacter.manifest_file_url, supabase)
+      fetchCachedTextFile({
+        url: dbCharacter.csp_skill_file_url,
+        supabase,
+        label: "CSP"
+      }),
+      fetchCachedTextFile({
+        url: dbCharacter.manifest_file_url,
+        supabase,
+        label: "manifest"
+      })
     ]);
     const timeContext = formatTimeContext(timeZone, lastMessageAt);
 
@@ -395,12 +429,12 @@ export async function POST(request: NextRequest) {
       emotionState: relationshipState?.mood || dbCharacter.mood || "neutral",
       relationshipState,
       longTermMemories: relevantMemories,
-      recentMessages: chronologicalMessages.slice(-10),
+      recentMessages: chronologicalMessages.slice(-8),
       userInput: userContent,
       imageDescription
     });
 
-    const assistantContent = await callChatModel([{ role: "system", content: finalPrompt }], aiConfig);
+    console.log(`[PERF] prompt length ${finalPrompt.length}`);
 
     const { data: userMessage, error: userMessageError } = await supabase
       .from("messages")
@@ -423,61 +457,106 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: userMessageError.message }, { status: 500 });
     }
 
-    const { data: assistantMessage, error: assistantMessageError } = await supabase
-      .from("messages")
-      .insert({
-        user_id: userId,
-        character_id: characterId,
-        role: "assistant",
-        content: assistantContent,
-        metadata: {
-          source: "ai",
-          model: aiConfig.model,
-          prompt_debug_enabled: Boolean(body.debug || process.env.PROMPT_DEBUG === "true"),
-          time_context: timeContext,
-          memories_used: relevantMemories,
-          memory_created: null,
-          relationship_state: relationshipState,
-          image_description: imageDescription
+    const encoder = new TextEncoder();
+    const aiStart = Date.now();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const write = (payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        };
+
+        let assistantContent = "";
+
+        try {
+          write({ type: "user_message", message: normalizeDbMessage(userMessage) });
+
+          for await (const delta of streamChatModel([{ role: "system", content: finalPrompt }], aiConfig)) {
+            assistantContent += delta;
+            write({ type: "delta", content: delta });
+          }
+
+          console.log(`[PERF] ai latency ${Date.now() - aiStart}ms`);
+
+          if (!assistantContent.trim()) {
+            throw new Error("AI response did not include message content");
+          }
+
+          const { data: assistantMessage, error: assistantMessageError } = await supabase
+            .from("messages")
+            .insert({
+              user_id: userId,
+              character_id: characterId,
+              role: "assistant",
+              content: assistantContent.trim(),
+              metadata: {
+                source: "ai",
+                model: aiConfig.model,
+                prompt_debug_enabled: Boolean(body.debug || process.env.PROMPT_DEBUG === "true"),
+                time_context: timeContext,
+                memories_used: relevantMemories,
+                memory_created: null,
+                relationship_state: relationshipState,
+                image_description: imageDescription
+              }
+            })
+            .select("*")
+            .single();
+
+          if (assistantMessageError) {
+            throw new Error(assistantMessageError.message);
+          }
+
+          write({
+            type: "done",
+            assistant_message: normalizeDbMessage(assistantMessage),
+            memory_created: null,
+            memories_used: relevantMemories,
+            debug_prompt: body.debug || process.env.PROMPT_DEBUG === "true" ? finalPrompt : undefined
+          });
+          controller.close();
+
+          void (async () => {
+            await maybeExtractAndStoreMemory({
+              supabase,
+              userId,
+              characterId,
+              userMessage: userMessage as DbMessage,
+              aiConfig
+            }).catch(() => null);
+
+            await supabase
+              .from("characters")
+              .update({ updated_at: new Date().toISOString() })
+              .eq("id", characterId);
+
+            await reflectAfterChat({
+              supabase,
+              userId,
+              characterId,
+              characterName: dbCharacter.name,
+              userContent,
+              assistantContent,
+              relationshipState,
+              aiConfig
+            });
+          })().catch((backgroundError) => {
+            console.error("[API /chat background] Error:", backgroundError);
+          });
+        } catch (streamError) {
+          console.log(`[PERF] ai latency ${Date.now() - aiStart}ms`);
+          const errorMessage = streamError instanceof Error ? streamError.message : "Unknown stream error";
+          write({ type: "error", error: errorMessage });
+          controller.close();
         }
-      })
-      .select("*")
-      .single();
-
-    if (assistantMessageError) {
-      return NextResponse.json({ error: assistantMessageError.message }, { status: 500 });
-    }
-
-    const createdMemory = await maybeExtractAndStoreMemory({
-      supabase,
-      userId,
-      characterId,
-      userMessage: userMessage as DbMessage,
-      aiConfig
-    }).catch(() => null);
-
-    await supabase
-      .from("characters")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", characterId);
-
-    await reflectAfterChat({
-      supabase,
-      userId,
-      characterId,
-      characterName: dbCharacter.name,
-      userContent,
-      assistantContent,
-      relationshipState,
-      aiConfig
+      }
     });
 
-    return NextResponse.json({
-      user_message: normalizeDbMessage(userMessage),
-      assistant_message: normalizeDbMessage(assistantMessage),
-      memory_created: createdMemory,
-      memories_used: relevantMemories,
-      debug_prompt: body.debug || process.env.PROMPT_DEBUG === "true" ? finalPrompt : undefined
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform"
+      }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown server error";

@@ -27,7 +27,7 @@ function section(title: string, content: string) {
 function formatRecentMessages(messages: DbMessage[]) {
   const recent = messages
     .filter((message) => message.role === "user" || message.role === "assistant")
-    .slice(-10);
+    .slice(-8);
 
   if (!recent.length) return "No recent messages.";
 
@@ -56,12 +56,8 @@ function formatLongTermMemories(memories: PromptMemory[]) {
   if (!memories.length) return "No long-term memories are available yet.";
 
   return memories
-    .map((memory) => {
-      const source = memory.source_message_id ? ` source_message_id=${memory.source_message_id}` : "";
-      const score =
-        typeof memory.similarity === "number" ? ` similarity=${memory.similarity.toFixed(3)}` : "";
-      return `- ${memory.content}${source}${score}`;
-    })
+    .slice(0, 3)
+    .map((memory) => `- ${memory.content.slice(0, 160)}`)
     .join("\n");
 }
 

@@ -295,17 +295,105 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         })
       });
 
-      const data = await readJsonResponse(response);
-
       if (!response.ok) {
+        const data = await readJsonResponse(response);
         throw new Error(data.error || `AI response failed with HTTP ${response.status}`);
       }
 
-      const nextMessages = [data.user_message, data.assistant_message].filter(Boolean).map(normalizeMessage);
-      setMessages((current) => [
-        ...(Array.isArray(current) ? current : []).filter((message) => message.id !== optimisticMessage.id),
-        ...nextMessages
-      ]);
+      if (!response.body) {
+        throw new Error("AI response did not include a stream.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let assistantMessageId = `local-assistant-${crypto.randomUUID()}`;
+
+      const handleStreamEvent = (eventData: unknown) => {
+        const event = eventData as {
+          type?: string;
+          content?: string;
+          error?: string;
+          message?: unknown;
+          assistant_message?: unknown;
+        };
+
+        if (event.type === "user_message" && event.message) {
+          const userMessage = normalizeMessage(event.message);
+          setMessages((current) => [
+            ...(Array.isArray(current) ? current : []).filter((message) => message.id !== optimisticMessage.id),
+            userMessage
+          ]);
+          return;
+        }
+
+        if (event.type === "delta" && typeof event.content === "string") {
+          setMessages((current) => {
+            const safeCurrent = Array.isArray(current) ? current : [];
+            const existing = safeCurrent.some((message) => message.id === assistantMessageId);
+
+            if (!existing) {
+              return [
+                ...safeCurrent,
+                {
+                  id: assistantMessageId,
+                  user_id: character.user_id,
+                  character_id: chatId,
+                  role: "assistant",
+                  content: event.content || "",
+                  image_url: null,
+                  metadata: {
+                    source: "stream",
+                    pending: true
+                  },
+                  created_at: new Date().toISOString()
+                }
+              ];
+            }
+
+            return safeCurrent.map((message) =>
+              message.id === assistantMessageId
+                ? { ...message, content: `${message.content}${event.content}` }
+                : message
+            );
+          });
+          return;
+        }
+
+        if (event.type === "done" && event.assistant_message) {
+          const assistantMessage = normalizeMessage(event.assistant_message);
+          setMessages((current) => {
+            const safeCurrent = Array.isArray(current) ? current : [];
+            const withoutTemporary = safeCurrent.filter((message) => message.id !== assistantMessageId);
+            assistantMessageId = assistantMessage.id;
+            return [...withoutTemporary, assistantMessage];
+          });
+          return;
+        }
+
+        if (event.type === "error") {
+          throw new Error(event.error || "AI stream failed.");
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          handleStreamEvent(JSON.parse(line));
+        }
+      }
+
+      if (buffer.trim()) {
+        handleStreamEvent(JSON.parse(buffer));
+      }
+
       clearSelectedImage();
       textareaRef.current?.focus();
     } catch (error) {
