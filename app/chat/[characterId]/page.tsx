@@ -223,7 +223,22 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       return;
     }
 
+    const optimisticMessage: DbMessage = {
+      id: `local-${crypto.randomUUID()}`,
+      user_id: character.user_id,
+      character_id: chatId,
+      role: "user",
+      content: content || "[Image]",
+      image_url: selectedImagePreview,
+      metadata: {
+        source: "local",
+        pending: true
+      },
+      created_at: new Date().toISOString()
+    };
+
     setInput("");
+    setMessages((current) => [...(Array.isArray(current) ? current : []), optimisticMessage]);
     setIsSending(true);
     setNotice("");
 
@@ -259,7 +274,10 @@ export default function ChatPage({ params }: { params: { characterId: string } }
       }
 
       const nextMessages = [data.user_message, data.assistant_message].filter(Boolean).map(normalizeMessage);
-      setMessages((current) => [...(Array.isArray(current) ? current : []), ...nextMessages]);
+      setMessages((current) => [
+        ...(Array.isArray(current) ? current : []).filter((message) => message.id !== optimisticMessage.id),
+        ...nextMessages
+      ]);
       clearSelectedImage();
       textareaRef.current?.focus();
     } catch (error) {
