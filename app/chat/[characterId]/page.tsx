@@ -25,6 +25,27 @@ function makeGreetingMessage(character: DbCharacter): DbMessage {
   };
 }
 
+function normalizeMessage(message: unknown): DbMessage {
+  const value = message as Partial<DbMessage> & { metadata?: Record<string, unknown> };
+  return {
+    id: String(value.id ?? crypto.randomUUID()),
+    user_id: String(value.user_id ?? ""),
+    character_id: String(value.character_id ?? ""),
+    role: (value.role === "user" || value.role === "assistant" || value.role === "system"
+      ? value.role
+      : "assistant") as DbMessage["role"],
+    content: String(value.content ?? ""),
+    image_url:
+      typeof value.image_url === "string"
+        ? value.image_url
+        : typeof value.metadata?.image_url === "string"
+          ? value.metadata.image_url
+          : null,
+    metadata: value.metadata ?? {},
+    created_at: String(value.created_at ?? new Date().toISOString())
+  };
+}
+
 async function readJsonResponse(response: Response) {
   try {
     return await response.json();
@@ -113,7 +134,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         }
 
         setCharacter(characterData as DbCharacter);
-        setMessages(Array.isArray(messageData) ? (messageData as DbMessage[]) : []);
+        setMessages(Array.isArray(messageData) ? messageData.map(normalizeMessage) : []);
       } catch (error) {
         if (!cancelled) {
           setNotice(error instanceof Error ? error.message : "聊天加载失败，请稍后重试。");
@@ -237,7 +258,7 @@ export default function ChatPage({ params }: { params: { characterId: string } }
         throw new Error(data.error || `AI response failed with HTTP ${response.status}`);
       }
 
-      const nextMessages = [data.user_message, data.assistant_message].filter(Boolean) as DbMessage[];
+      const nextMessages = [data.user_message, data.assistant_message].filter(Boolean).map(normalizeMessage);
       setMessages((current) => [...(Array.isArray(current) ? current : []), ...nextMessages]);
       clearSelectedImage();
       textareaRef.current?.focus();

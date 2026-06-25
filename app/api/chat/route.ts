@@ -25,6 +25,27 @@ type ReflectionResult = {
   state_summary?: string | null;
 };
 
+function normalizeDbMessage(message: unknown): DbMessage {
+  const value = message as Partial<DbMessage> & { metadata?: Record<string, unknown> };
+  return {
+    id: String(value.id ?? crypto.randomUUID()),
+    user_id: String(value.user_id ?? ""),
+    character_id: String(value.character_id ?? ""),
+    role: (value.role === "user" || value.role === "assistant" || value.role === "system"
+      ? value.role
+      : "assistant") as DbMessage["role"],
+    content: String(value.content ?? ""),
+    image_url:
+      typeof value.image_url === "string"
+        ? value.image_url
+        : typeof value.metadata?.image_url === "string"
+          ? value.metadata.image_url
+          : null,
+    metadata: value.metadata ?? {},
+    created_at: String(value.created_at ?? new Date().toISOString())
+  };
+}
+
 function createServerSupabaseClient(accessToken: string) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     ?.replace(/\/rest\/v1\/?$/, "")
@@ -322,7 +343,7 @@ export async function POST(request: NextRequest) {
     }
 
     const dbCharacter = character as DbCharacter;
-    const chronologicalMessages = [...((recentMessages ?? []) as DbMessage[])].reverse();
+    const chronologicalMessages = [...((recentMessages ?? []) as unknown[])].reverse().map(normalizeDbMessage);
     const lastMessageAt = chronologicalMessages.at(-1)?.created_at;
     const imageDescription =
       body.imageDescription?.trim() || (imageUrl ? await describeImage(imageUrl) : null);
@@ -382,10 +403,10 @@ export async function POST(request: NextRequest) {
         character_id: characterId,
         role: "user",
         content: content || "[Image]",
-        image_url: imageUrl,
         metadata: {
           source: "web",
           time_zone: timeZone,
+          image_url: imageUrl,
           image_description: imageDescription
         }
       })
@@ -403,7 +424,6 @@ export async function POST(request: NextRequest) {
         character_id: characterId,
         role: "assistant",
         content: assistantContent,
-        image_url: null,
         metadata: {
           source: "ai",
           model: process.env.AI_MODEL,
@@ -445,8 +465,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
-      user_message: userMessage,
-      assistant_message: assistantMessage,
+      user_message: normalizeDbMessage(userMessage),
+      assistant_message: normalizeDbMessage(assistantMessage),
       memory_created: createdMemory,
       memories_used: relevantMemories,
       debug_prompt: body.debug || process.env.PROMPT_DEBUG === "true" ? finalPrompt : undefined
